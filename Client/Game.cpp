@@ -2,13 +2,14 @@
 
 Game::Game() :
     is_active(false),
-    window_focused(false)
+    window_focused(false),
+    window(nullptr)
 {}
 
 void Game::update_objects(sf::Packet& packet)
 {
     sf::Int16 type_tmp;
-    int counter = 0;
+    int counter_bull = 0, counter_dev = 0;
 
     while (packet >> type_tmp)
     {
@@ -18,21 +19,30 @@ void Game::update_objects(sf::Packet& packet)
         if (type == conf::ObjectType::PLAYER)
             update_player(packet);
 
-        else if(type == conf::ObjectType::BULLET)
+        else if (type == conf::ObjectType::BULLET)
         {
-            if(counter == bullets.size())
+            if(counter_bull == bullets.size())
+
                 bullets.emplace_back(GraphObject(&bullet, conf::Bullet::sprite_width, conf::Bullet::sprite_height,
                         conf::Bullet::default_pos_x, conf::Bullet::default_pos_y, conf::Dir::LEFT));
-            update_bullet(packet, counter++);
+            update_bullet(packet, counter_bull++);
         }
         else if(type == conf::ObjectType::ENEMY)
-            update_ememy(packet);
+        {
+            if(counter_dev == enemies.size())
+                enemies.emplace_back(GraphObject(&enemy, conf::Enemy::sprite_width, conf::Enemy::sprite_height,
+                        conf::Enemy::default_pos_x, conf::Enemy::default_pos_y, conf::Dir::LEFT));
+            update_ememy(packet, counter_dev++);
+        }
         else
             continue;
     }
 
-    while(counter < bullets.size())
-        bullets[counter++].set_position(conf::Bullet::default_pos_x, conf::Bullet::default_pos_y, conf::LEFT);
+    while(counter_bull < bullets.size())
+        bullets[counter_bull++].set_position(conf::Bullet::default_pos_x, conf::Bullet::default_pos_y, conf::LEFT);
+
+    while(counter_dev < enemies.size())
+        enemies[counter_dev++].set_position(conf::Enemy::default_pos_x, conf::Enemy::default_pos_y, conf::LEFT);
 }
 
 
@@ -51,31 +61,39 @@ void Game::update_player(sf::Packet& packet)
     if (dir == conf::Dir::NONE)
     {
         players.erase(id);
-        hp.erase(hp.begin() + id - 1);
+        hp.erase(id);
         return;
     }
 
     if (players.count(id) == 0)
     {
-    sf::Texture* tx = (id % 2 ? &robot1 : &robot2);
+        sf::Texture* tx = (id % 2 ? &robot1 : &robot2);
 
-    players.emplace(id, GraphObject(tx, conf::Player::sprite_width, conf::Player::sprite_height,
+        players.emplace(id, GraphObject(tx, conf::Player::sprite_width, conf::Player::sprite_height,
                                     250, 250, conf::Dir::LEFT));
-        hp.emplace_back(sf::Text("", cyrilic, 20));
-        hp.back().setFillColor(sf::Color::Red);
+        if(id == owner)
+        {
+            hp.emplace(id, sf::Text("", cyrilic, 20));
+            hp[id].setFillColor(sf::Color::Red);
+        }
 
     }
 
     players[id].frame_pos(dir, current_frame);
     players[id].set_position(x, y, dir);
 
-    player_hp << health;
-    hp[id - 1].setString(conf::Player::hp + player_hp.str());
-    hp[id - 1].setPosition(x + conf::Player::text_indent_x, y + conf::Player::text_indent_y);
-    player_hp.str(std::string());
+    if (id == owner)
+    {
+        set_camera(x, y);
+        player_hp << health;
+        hp[id].setString(conf::Player::hp + player_hp.str());
+        hp[id].setPosition(camera.getCenter().x + conf::Player::text_indent_x,
+                camera.getCenter().y + conf::Player::text_indent_y);
+        player_hp.str(std::string());
+    }
 }
 
-void Game::update_ememy(sf::Packet &packet)
+void Game::update_ememy(sf::Packet &packet, int counter)
 {
     float x, y;
     int current_frame;
@@ -85,21 +103,10 @@ void Game::update_ememy(sf::Packet &packet)
     packet >> number >> x >> y >> dir_tmp >> current_frame;
 
     auto dir = (conf::Dir) dir_tmp;
+    wave_number = number;
 
-    if (dir == conf::Dir::NONE)
-    {
-        enemies.erase(enemies.begin() + number);
-        return;
-    }
-
-    if (number + 1 >  enemies.size())
-    {
-        enemies.emplace_back(GraphObject(&enemy, conf::Enemy::sprite_width, conf::Enemy::sprite_height,
-                                        250, 250, conf::Dir::LEFT));
-    }
-
-    enemies[number].frame_pos(dir, current_frame);
-    enemies[number].set_position(x, y, dir);
+    enemies[counter].frame_pos(dir, current_frame);
+    enemies[counter].set_position(x, y, dir);
 }
 
 void Game::update_bullet(sf::Packet& packet, int counter)
@@ -118,7 +125,9 @@ void Game::update_bullet(sf::Packet& packet, int counter)
 
 void Game::start()
 {
-    window = new sf::RenderWindow(sf::VideoMode(conf::Map::width, conf::Map::height), conf::Map::window_name);
+    window = new sf::RenderWindow(sf::VideoMode(conf::Window::width, conf::Window::height), conf::Window::window_name);
+    camera.reset(sf::FloatRect(0, 0 ,conf::Window::width, conf::Window::height));
+    camera.zoom(conf::Window::zoom);
     window->clear();
     window->display();
 
@@ -131,6 +140,10 @@ void Game::start()
     Map = GraphObject(&map, conf::Map::sprite_width, conf::Map::sprite_height, 0, 0, conf::DOWN);
 
     cyrilic.loadFromFile(conf::Player::font_filename);
+
+    wave.setFont(cyrilic);
+    wave.setFillColor(sf::Color::Red);
+    wave.setCharacterSize(20);
 
     is_active = true;
 
@@ -146,29 +159,27 @@ void Game::keyboard_reader()
             conf::Dir dir = keyboard.get_direction();
             bool is_shoot = keyboard.get_shoot();
 
-            packet.clear();
-            if (dir != conf::Dir::NONE || is_shoot)
-            {
-                packet << (sf::Int16) dir << (sf::Int16) is_shoot;
-            }
+            mutex.lock();
+            inp.dir = dir;
+            inp.is_shoot = is_shoot;
+            mutex.unlock();
 
             sf::sleep(sf::milliseconds(20));
         }
-
     }
 }
 
-sf::Packet Game::get_packet()
+PlayerInput Game::get_input()
 {
-    sf::Packet copy = packet;
-    packet.clear();
+    sf::Lock lock(mutex);
 
-    return copy;
+    return inp;
 }
 
 
 void Game::render()
 {
+    window->setView(camera);
     window->clear();
     map_render(window);
     for (auto& pl : players)
@@ -178,18 +189,30 @@ void Game::render()
         bul.draw(window);
 
     for(auto& text : hp)
-        window->draw(text);
+        window->draw(text.second);
+
+    player_hp << wave_number;
+    wave.setString(conf::Enemy::wave + player_hp.str());
+    wave.setPosition(camera.getCenter().x + conf::Player::text_indent_x + 100,
+                     camera.getCenter().y + conf::Player::text_indent_y);
+    window->draw(wave);
+    player_hp.str(std::string());
 
     for(auto& en : enemies)
+    {
         en.draw(window);
+    }
 
     window->display();
 }
 
 Game::~Game()
 {
-    window->close();
-    delete window;
+    if (window)
+    {
+        window->close();
+        delete window;
+    }
 }
 
 void Game::set_active(bool b)
@@ -225,11 +248,66 @@ void Game::map_render(sf::RenderWindow* window) {
     for (int y = 0; y < conf::Map::frame_height; y++)
         for (int x = 0; x < conf::Map::frame_width; x++)
         {
-            if(conf::Map::TileMap[y][x] == ' ')
-                Map.frame_pos(conf::DOWN, 0);
-            if(conf::Map::TileMap[y][x] == '0')
-                Map.frame_pos(conf::DOWN, 1);
-            Map.set_position((x + 0.5) * conf::Map::sprite_width, (y + 0.5) * conf::Map::sprite_height, conf::NONE);
+            switch (conf::Map::TileMap[y][x])
+            {
+                case ' ':
+                    Map.title(578, 866);
+                    break;
+                case '0':
+                    Map.title(506,218);
+                    break;
+                case 'p':
+                    Map.title(578, 867);
+                    Map.set_position((x + 0.5f) * conf::Map::sprite_width,
+                                     (y + 0.5f) * conf::Map::sprite_height, conf::NONE);
+                    Map.draw(window);
+                    Map.title(74, 1);
+                    break;
+                case 'f':
+                    Map.title(578, 866);
+                    Map.set_position((x + 0.5f) * conf::Map::sprite_width,
+                                     (y + 0.5f) * conf::Map::sprite_height, conf::NONE);
+                    Map.draw(window);
+                    Map.title(74, 146);
+                    break;
+                default:
+                    continue;
+
+            }
+
+            Map.set_position((x + 0.5f) * conf::Map::sprite_width,
+                             (y + 0.5f) * conf::Map::sprite_height, conf::NONE);
             Map.draw(window);
         }
+}
+
+void Game::set_owner(ClientId id)
+{
+    owner = id;
+}
+
+void Game::set_camera(float x, float y)
+{
+    float cam_x = x;
+    float cam_y = y;
+    float zoom  = conf::Window::zoom;
+
+    float win_x = conf::Window::width * zoom;
+    float win_y = conf::Window::height * zoom;
+    float map_x = conf::Map::width;
+    float map_y = conf::Map::height;
+
+    if(cam_x < win_x / 2)
+        cam_x = win_x / 2;
+
+    if(cam_y < win_y / 2)
+        cam_y = win_y / 2;
+
+    if(cam_x > map_x - win_x / 2)
+        cam_x = map_x - win_x / 2;
+    if(cam_y > map_y - win_y / 2)
+        cam_y = map_y - win_y / 2;
+
+    camera.setCenter(cam_x, cam_y);
+
 }

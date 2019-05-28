@@ -1,27 +1,14 @@
-#include "Client.h"
+#include "Game_Client.h"
 #include <X11/Xlib.h>
 
 int main()
 {
     XInitThreads();
-    try
-    {
-        /*
-        std::cout << "Enter server ip: ";
-        std::string str;
-        std::cin >> str;
 
-        sf::IpAddress server_ip(str);
-*/
-        Client client(sf::IpAddress::LocalHost, Network::ServerPort);
-        Game game;
+    Game_Client game_client;
 
-        client.start(&game);
-    }
-    catch (std::runtime_error& err)
-    {
-        std::cout << err.what() << std::endl;
-    }
+    game_client.play();
+
 
     return 0;
 }

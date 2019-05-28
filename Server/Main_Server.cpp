@@ -1,19 +1,16 @@
-#include "Server.h"
+#include "Game_Server.h"
+#include <X11/Xlib.h>
+
 
 int main()
 {
-    Server server;
-    server.connect_clients();
+    XInitThreads();
 
-    while (true)
-    {
-        World world;
-
-        bool status = server.start(&world);
-
-        if (!status)
-            break;
-    }
+    Game_Server game_server;
+    game_server.play();
 
     return 0;
 }
+
+
+
